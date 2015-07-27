@@ -1,0 +1,10 @@
+syntax: glob
+test/data
+*.pyc
+*.pyo
+*.pyd
+*.so
+build/
+dist/
+.*.sw*
+natcap.testing.egg-info/
