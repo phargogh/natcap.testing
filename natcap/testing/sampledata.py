@@ -4,6 +4,7 @@ import collections
 import tempfile
 import subprocess
 import logging
+import inspect
 
 import numpy
 
@@ -183,6 +184,69 @@ def vector(
     out_vector = None
 
     return vector_uri
+
+class Factory(object):
+    allowed_params = set([])
+
+    def __init__(self, **kwargs):
+        self._check_allowed_params(kwargs)
+
+        for user_param, user_value in kwargs.iteritems():
+            setattr(self, user_param, user_value)
+
+    def creation_func(self):
+        return lambda x: x
+
+    def _check_allowed_params(self, kwargs):
+        for user_param, user_value in kwargs.iteritems():
+            if user_param not in self.allowed_params:
+                raise RuntimeError('Provided parameters "%s" not allowed' % user_param)
+
+    def _get_attrs(self):
+        factory_func_attrs = {}
+        for attribute in dir(self):
+            if attribute in self.allowed_params:
+                factory_func_attrs[attribute] = getattr(self, attribute)
+        return factory_func_attrs
+
+    def new(self, *args, **kwargs):
+        argnames, _, _, _ = inspect.getargspec(self.creation_func())
+
+        out_kwargs = {}
+        exclusions = set(['self'])
+
+        # If the user added any positional arguments, convert them to kwargs.
+        if len(args) > 0:
+            for argname, argvalue in zip(argnames, args):
+                if argname not in exclusions:
+                    out_kwargs[argname] = argvalue
+
+        # If the user provided any keyword args, add them to the output
+        # dictionary
+        if len(kwargs) > 0:
+            for argname, argvalue in kwargs.iteritems():
+                if argname not in exclusions:
+                    out_kwargs[argname] = argvalue
+
+        self._check_allowed_params(kwargs)
+
+        # Fill in any defaults from the factory that the user didn't provide.
+        for base_attr_name, base_attr_value in self._get_attrs().iteritems():
+            out_kwargs[base_attr_name] = base_attr_value
+
+        return self.creation_func()(**out_kwargs)
+
+class RasterFactory(Factory):
+    allowed_params = set(['pixels', 'nodata', 'reference', 'filename'])
+
+    def creation_func(self):
+        return raster
+
+class VectorFactory(Factory):
+    allowed_params = set(['geometries', 'reference', 'fields', 'features',
+                          'vector_format', 'filename'])
+    def creation_func(self):
+        return vector
 
 def visualize(file_list):
     """
