@@ -3,7 +3,11 @@ import hashlib
 import functools
 import shutil
 import logging
+import os
+import platform
 
+import numpy
+from osgeo import gdal
 import pygeoprocessing
 
 from natcap.testing import data_storage
@@ -199,4 +203,63 @@ def build_regression_archives(file_uri, input_archive_uri, output_archive_uri):
         archive_uri = archive_uri[:-7]
     LOGGER.debug('Archiving the output workspace')
     shutil.make_archive(archive_uri, 'gztar', root_dir=workspace, logger=LOGGER)
+
+
+def snapshot_folder(workspace_uri, logfile_uri):
+    """Recurse through the workspace_uri and for every file in the workspace,
+    record the filepath and md5sum to the logfile.  Additional environment
+    metadata will also be recorded to help debug down the road.
+
+    This output logfile will have two sections separated by a blank line.
+    The first section will have relevant system information, with keys and values
+    separated by '=' and some whitespace.
+
+    This second section will identify the files we're snapshotting and the
+    md5sums of these files, separated by '::' and some whitspace on each line.
+    MD5sums are determined by calling `natcap.testing.utils.get_hash()`.
+
+    Args:
+        workspace_uri (string): A URI to the workspace to analyze
+
+        logfile_uri (string): A URI to the logfile to which md5sums and paths
+        will be recorded.
+
+        workspace_varname (string): The string variable name that should be
+        used when setting the ws_uri variable initially.
+
+    Returns:
+        Nothing.
+    """
+
+    logfile = open(logfile_uri, 'w')
+    def _write(line):
+        """
+        Write a line to the logfile with a trailing newline character.
+        """
+        logfile.write(line + '\n')
+
+    _write('orig_workspace = %s' % os.path.abspath(workspace_uri))
+    _write('OS = %s' % platform.system())
+    _write('plat_string = %s' % platform.platform())
+    _write('GDAL = %s' % gdal.__version__)
+    _write('numpy = %s' % numpy.__version__)
+    _write('')  # blank line to signal end of section
+
+    ignore_exts = ['.shx']
+    for dirpath, _, filenames in os.walk(workspace_uri):
+        for filename in filenames:
+            filepath = os.path.join(dirpath, filename)
+
+            # if the extension is in our set of extensions to ignore, skip it.
+            if os.path.splitext(filepath)[-1] in ignore_exts:
+                continue
+
+            md5sum = get_hash(filepath)
+            relative_filepath = filepath.replace(workspace_uri + os.sep, '')
+
+            # Convert to unix path separators for all cases.
+            if platform.system() == 'Windows':
+                relative_filepath = relative_filepath.replace(os.sep, '/')
+
+            _write('{file} :: {md5}'.format(file=relative_filepath, md5=md5sum))
 

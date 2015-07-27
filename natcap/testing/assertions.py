@@ -489,3 +489,44 @@ def assert_files(file_1_uri, file_2_uri):
         file_2_md5 = utils.get_hash(file_2_uri)
         assert_equal(file_1_md5, file_2_md5,
             'Files %s and %s differ (MD5sum)' % (file_1_uri, file_2_uri))
+
+def assert_snapshot(folder, snapshot_file):
+    """
+    Assert all files in a directory according to the snapshot file recorded
+    by `natcap.testing.utils.snapshot_folder()`.  Any files not in the
+    snapshot file are ignored.
+
+    Parameters:
+        folder (string) the path to the folder to recurse through and check
+            md5sums for.
+        snapshot_file (string) the path to the snapshot file to use.
+
+    Raises:
+        AssertionError when a nonmatching md5sum is found.
+    """
+
+    snapshot = open(snapshot_file)
+    env_params = {}
+    for line in snapshot:
+        # a blank line signals the end of the env section
+        if line.strip() == '':
+            break
+        name, value = line.split('=')
+        env_params[name.strip()] = value.strip()
+
+    files = {}
+    for line in snapshot:
+        filename, md5sum = line.split('::')
+        files[filename.strip()] = md5sum.strip()
+
+    nonmatching_files = []
+    for filepath, expected_md5sum in files.iteritems():
+        full_filepath = os.path.join(folder, filepath)
+        current_md5sum = utils.get_hash(full_filepath)
+        if current_md5sum != expected_md5sum:
+            nonmatching_files.append(filepath)
+
+    if len(nonmatching_files) != 0:
+        raise AssertionError('{num_err} files out of {num_files} have differing md5sums: {files}'.format(
+            num_err=len(nonmatching_files), num_files=len(files), files=nonmatching_files))
+
