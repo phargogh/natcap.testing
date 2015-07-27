@@ -186,6 +186,26 @@ def vector(
     return vector_uri
 
 class Factory(object):
+    """
+    The Factory object allows for multiple geospatial files of a consistent
+    type (e.g. rasters, vectors) to be created from common parameters.
+
+    For example, a RasterFactory could be instantiated with default pixel values
+    and SRS, and then the user would only be required to provide the nodata value
+    when calling Factory.new(), as the factory instance would use the default
+    values provided on creation.
+
+    Calls to factory.new() allow the user to override any defaults provided by
+    the Factory.  User options provided at this stage will always take precendent
+    over any settings provided at instantiation.
+
+    Creating a Factory object does not require that the user provide any arguments,
+    but if you're doing this, then you might as well just call raster() or vector()
+    directly!
+
+    Also, Factory objects will not accept parameters not allowed by their
+    creator functions.
+    """
     allowed_params = set([])
 
     def __init__(self, **kwargs):
@@ -195,14 +215,34 @@ class Factory(object):
             setattr(self, user_param, user_value)
 
     def creation_func(self):
+        """
+        Define the identity function for now.  This method should be
+        overridden in the appropriate subclass.
+        """
         return lambda x: x
 
     def _check_allowed_params(self, kwargs):
+        """
+        Check the input dictionary to see if there are any provided
+        parameters that are not allowed by the creation function.
+
+        Raise a RuntimeError if so.
+        """
         for user_param, user_value in kwargs.iteritems():
             if user_param not in self.allowed_params:
                 raise RuntimeError('Provided parameters "%s" not allowed' % user_param)
 
     def _get_attrs(self):
+        """
+        Return a dictionary of the parameters that the user provided when
+        creating this Factory instance, or that have been set manually
+        sometime thereafter.  Attributes are only returned if they are in
+        `self.allowed_params`.
+
+        Returns:
+            A dictionary mapping {'argname': arg_value}, where 'argname'
+            is the parameter name for the target creation function.
+        """
         factory_func_attrs = {}
         for attribute in dir(self):
             if attribute in self.allowed_params:
@@ -210,39 +250,66 @@ class Factory(object):
         return factory_func_attrs
 
     def new(self, *args, **kwargs):
+        """
+        Create a new geospatial object, where the object is defined by the user
+        as the return value of the function self.creation_func(), and the
+        function takes some (or no) input parameters.
+
+        This object method allows the user to override any defaults that the
+        Factory instance was created with (if any overrides are provided),
+        and any parameters not overridden will fall back to what the user
+        provided as a default parameter on creation of the Factory.
+
+        Any parameter omissions will raise a `TypeError`, as the
+        underlying creation function will not fail unless appropriate
+        parameters are provided.
+        """
+
+        # Inspect the factory's creation function to get the names of the
+        # function arguments.  Useful to converting args to kwargs.
         argnames, _, _, _ = inspect.getargspec(self.creation_func())
 
         out_kwargs = {}
         exclusions = set(['self'])
 
-        # If the user added any positional arguments, convert them to kwargs.
-        if len(args) > 0:
-            for argname, argvalue in zip(argnames, args):
-                if argname not in exclusions:
-                    out_kwargs[argname] = argvalue
+        # check whether the user added positional or keyword arguments.
+        # If so, add them accordingly to the out_kwargs dictionary.
+        # Tuple of (args_value to check, iterator yielding (key, value))
+        user_inputs = [
+            (args, zip(argnames, args)),
+            (kwargs, kwargs.iteritems())
+        ]
 
-        # If the user provided any keyword args, add them to the output
-        # dictionary
-        if len(kwargs) > 0:
-            for argname, argvalue in kwargs.iteritems():
-                if argname not in exclusions:
-                    out_kwargs[argname] = argvalue
+        for user_input, iterator in user_inputs:
+            if len(user_input) > 0:
+                for argname, argvalue in iterator:
+                    if argname not in exclusions:
+                        out_kwargs[argname] = argvalue
 
-        self._check_allowed_params(kwargs)
+        # Check the user-defined kwargs to be sure an invalid parameter has not
+        # been provided.
+        self._check_allowed_params(out_kwargs)
 
         # Fill in any defaults from the factory that the user didn't provide.
         for base_attr_name, base_attr_value in self._get_attrs().iteritems():
             out_kwargs[base_attr_name] = base_attr_value
 
+        # Run the factory's creation function.
         return self.creation_func()(**out_kwargs)
 
 class RasterFactory(Factory):
+    """
+    Factory subclass for creating rasters.
+    """
     allowed_params = set(['pixels', 'nodata', 'reference', 'filename'])
 
     def creation_func(self):
         return raster
 
 class VectorFactory(Factory):
+    """
+    Factory subclass for creating vectors.
+    """
     allowed_params = set(['geometries', 'reference', 'fields', 'features',
                           'vector_format', 'filename'])
     def creation_func(self):
@@ -252,6 +319,10 @@ def visualize(file_list):
     """
     Open the specified geospatial files with the provided application or
     visualization method (qgis is the only supported method at the moment).
+
+    NOTE: This functionality does not appear to work on Darwin systems
+    with QGIS installed via homebrew.  In this case, QGIS will open, but
+    will not show the files requested.
 
     Parameters:
         file_list (list): a list of string filepaths to geospatial files.
